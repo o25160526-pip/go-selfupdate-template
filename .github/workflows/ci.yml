@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+  CGO_ENABLED: "0"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache Go build output
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-${{ runner.os }}-
+      - run: gofmt -w . && git diff --exit-code
+      - run: go vet ./...
+      - run: go test ./... -race -count=1
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64, ext: "" }
+          - { goos: linux, goarch: arm64, ext: "" }
+          - { goos: darwin, goarch: amd64, ext: "" }
+          - { goos: darwin, goarch: arm64, ext: "" }
+          - { goos: windows, goarch: amd64, ext: ".exe" }
+          - { goos: windows, goarch: arm64, ext: ".exe" }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Generate collision-safe UTC version
+        id: version
+        shell: bash
+        run: |
+          display=$(go run ./tools/genversion -check-tags=false -format=display)
+          echo "display=$display" >> "$GITHUB_OUTPUT"
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.display }}
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Current=${VERSION}' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Commit=${GITHUB_SHA}' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" -o "dist/app_${GOOS}_${GOARCH}${{ matrix.ext }}" ./cmd/app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
