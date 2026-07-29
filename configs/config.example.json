@@ -1,0 +1,26 @@
+{
+  "app_name": "app",
+  "asset_prefix": "app",
+  "channel": "stable",
+  "auto_update": false,
+  "check_interval": "6h",
+  "timeout": "5m",
+  "manifest_url": "https://example.invalid/manifest.json",
+  "require_signature": true,
+  "cache_ttl": "15m",
+  "prefetch_count": 3,
+  "keep_blobs": 6,
+  "sources": [
+    {
+      "type": "github",
+      "owner": "o25160526-pip",
+      "repo": "go-selfupdate-template"
+    },
+    {
+      "type": "azure",
+      "mode": "blob",
+      "index_url": "https://storage.example.invalid/releases/index.json",
+      "disabled": true
+    }
+  ]
+}
