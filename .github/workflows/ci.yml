@@ -38,27 +38,32 @@ jobs:
         run: jq empty .github/build-config.json
       - run: gofmt -w .
       - run: go vet ./...
-      - name: Test every package and publish diagnostics
+      - name: Test packages separately
         shell: bash
         run: |
-          set -o pipefail
+          set -uo pipefail
           mkdir -p ci-logs
-          go test ./... -count=1 -v 2>&1 | tee ci-logs/go-test.log
-          status=${PIPESTATUS[0]}
-          if [[ "$status" -ne 0 ]]; then
-            log=$(tr '\n' ' ' < ci-logs/go-test.log | cut -c1-6000)
-            log=${log//'%'/'%25'}
-            log=${log//$'\r'/'%0D'}
-            log=${log//$'\n'/'%0A'}
-            echo "::error file=ci-logs/go-test.log,line=1,title=go test failure::$log"
-          fi
-          exit "$status"
+          failed=0
+          while read -r package; do
+            [[ -z "$package" ]] && continue
+            file="ci-logs/$(echo "$package" | tr '/:' '__').log"
+            echo "===== $package ====="
+            if ! go test "$package" -count=1 -v >"$file" 2>&1; then
+              failed=1
+              tail -c 4000 "$file"
+              msg=$(tail -c 1800 "$file" | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+              echo "::error file=.github/workflows/ci.yml,line=1,title=failed package $package::$msg"
+            else
+              cat "$file"
+            fi
+          done < <(go list ./...)
+          exit "$failed"
       - name: Upload test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: go-test-log-${{ github.sha }}
-          path: ci-logs/go-test.log
+          name: go-test-logs-${{ github.sha }}
+          path: ci-logs/
           if-no-files-found: ignore
 
   build:
