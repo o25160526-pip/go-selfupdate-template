@@ -1,0 +1,24 @@
+{
+  "app": "app",
+  "module": "github.com/o25160526-pip/go-selfupdate-template",
+  "version": {
+    "format": "display",
+    "timezone": "UTC",
+    "generator_args": ["-check-tags=false", "-format=display"]
+  },
+  "targets": [
+    { "goos": "linux", "goarch": "amd64", "extension": "" },
+    { "goos": "linux", "goarch": "arm64", "extension": "" },
+    { "goos": "darwin", "goarch": "amd64", "extension": "" },
+    { "goos": "darwin", "goarch": "arm64", "extension": "" },
+    { "goos": "windows", "goarch": "amd64", "extension": ".exe" },
+    { "goos": "windows", "goarch": "arm64", "extension": ".exe" }
+  ],
+  "checks": {
+    "run_vet": true,
+    "run_tests": true,
+    "race": true,
+    "verify_version": true,
+    "verify_artifacts": true
+  }
+}
