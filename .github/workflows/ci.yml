@@ -30,26 +30,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: go-build-${{ runner.os }}-${{ hashFiles('go.mod') }}-${{ github.sha }}
           restore-keys: |
-            go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-${{ runner.os }}-${{ hashFiles('go.mod') }}-
             go-build-${{ runner.os }}-
+      - name: Verify repository build configuration
+        run: jq empty .github/build-config.json
       - run: gofmt -w .
       - run: go vet ./...
       - run: go test ./... -race -count=1
 
   build:
     needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { goos: linux, goarch: amd64, ext: "" }
-          - { goos: linux, goarch: arm64, ext: "" }
-          - { goos: darwin, goarch: amd64, ext: "" }
-          - { goos: darwin, goarch: arm64, ext: "" }
-          - { goos: windows, goarch: amd64, ext: ".exe" }
-          - { goos: windows, goarch: arm64, ext: ".exe" }
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,22 +49,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Generate collision-safe UTC version
-        id: version
-        shell: bash
-        run: |
-          display=$(go run ./tools/genversion -check-tags=false -format=display)
-          echo "display=$display" >> "$GITHUB_OUTPUT"
-      - name: Build
+      - name: Build from configured targets with fallback
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          VERSION: ${{ steps.version.outputs.display }}
-        run: |
-          mkdir -p dist
-          go build -trimpath -ldflags "-s -w -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Current=${VERSION}' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Commit=${GITHUB_SHA}' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" -o "dist/app_${GOOS}_${GOARCH}${{ matrix.ext }}" ./cmd/app
+          BUILD_CONFIG_FILE: ${{ vars.BUILD_CONFIG_FILE }}
+          VERSION: ${{ github.event.inputs.version || '' }}
+        run: bash scripts/ci-build.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: app-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: app-build-${{ github.sha }}
           path: dist/*
           if-no-files-found: error
