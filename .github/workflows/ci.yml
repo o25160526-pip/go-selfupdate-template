@@ -76,10 +76,28 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Build from configured targets with fallback
+        id: configured-build
         env:
           BUILD_CONFIG_FILE: ${{ vars.BUILD_CONFIG_FILE }}
           VERSION: ${{ github.event.inputs.version || '' }}
-        run: bash scripts/ci-build.sh
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          bash -x scripts/ci-build.sh 2>&1 | tee ci-logs/build.log
+          status=${PIPESTATUS[0]}
+          if [[ "$status" -ne 0 ]]; then
+            msg=$(tail -c 5000 ci-logs/build.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            echo "::error file=scripts/ci-build.sh,line=1,title=configured build failure::$msg"
+          fi
+          exit "$status"
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.sha }}
+          path: ci-logs/build.log
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: app-build-${{ github.sha }}
