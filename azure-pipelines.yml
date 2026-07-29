@@ -1,0 +1,63 @@
+trigger:
+  branches:
+    include: [main]
+
+pr:
+  branches:
+    include: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  GOMODCACHE: $(Pipeline.Workspace)/gomod
+  GOCACHE: $(Pipeline.Workspace)/gobuild
+  CGO_ENABLED: '0'
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+
+  - task: GoTool@0
+    inputs:
+      version: '1.23.0'
+
+  - task: Cache@2
+    displayName: Cache Go modules
+    inputs:
+      key: 'gomod | "$(Agent.OS)" | go.mod'
+      restoreKeys: 'gomod | "$(Agent.OS)"'
+      path: $(GOMODCACHE)
+
+  - task: Cache@2
+    displayName: Cache Go build
+    inputs:
+      key: 'gobuild | "$(Agent.OS)" | go.mod | "$(Build.SourceVersion)"'
+      restoreKeys: |
+        gobuild | "$(Agent.OS)" | go.mod
+        gobuild | "$(Agent.OS)"
+      path: $(GOCACHE)
+
+  - script: gofmt -w . && git diff --exit-code
+    displayName: Check formatting
+
+  - script: go vet ./... && go test ./... -race -count=1
+    displayName: Test
+
+  - bash: |
+      set -euo pipefail
+      VERSION=$(go run ./tools/genversion -check-tags=false -format=display)
+      mkdir -p dist
+      for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+        GOOS=${target%/*}; GOARCH=${target#*/}; EXT=""
+        [ "$GOOS" = windows ] && EXT=.exe
+        GOOS=$GOOS GOARCH=$GOARCH go build -trimpath \
+          -ldflags "-s -w -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Current=$VERSION' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Commit=$(Build.SourceVersion)' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+          -o "dist/app_${GOOS}_${GOARCH}${EXT}" ./cmd/app
+      done
+      cd dist && sha256sum app_* > checksums.txt
+    displayName: Build six targets
+
+  - publish: dist
+    artifact: release-$(Build.BuildNumber)
+    displayName: Publish pipeline artifact
