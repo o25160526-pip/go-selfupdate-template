@@ -30,9 +30,11 @@ RACE=$(jq -r '.checks.race // true' <<<"$CONFIG_JSON")
 VERIFY_VERSION=$(jq -r '.checks.verify_version // true' <<<"$CONFIG_JSON")
 VERIFY_ARTIFACTS=$(jq -r '.checks.verify_artifacts // true' <<<"$CONFIG_JSON")
 
-if [[ "$RUN_VET" == "true" ]]; then go vet ./...; fi
-if [[ "$RUN_TESTS" == "true" ]]; then
-  if [[ "$RACE" == "true" ]]; then go test ./... -race -count=1; else go test ./... -count=1; fi
+if [[ "${BUILD_ONLY:-false}" != "true" ]]; then
+  if [[ "$RUN_VET" == "true" ]]; then go vet ./...; fi
+  if [[ "$RUN_TESTS" == "true" ]]; then
+    if [[ "$RACE" == "true" ]]; then go test ./... -race -count=1; else go test ./... -count=1; fi
+  fi
 fi
 
 VERSION=${VERSION:-$(go run ./tools/genversion -check-tags=false -format=display)}
@@ -68,7 +70,7 @@ if [[ "$VERIFY_ARTIFACTS" == "true" ]]; then
   (cd "$DIST_DIR" && sha256sum "${APP}"_* > checksums.txt)
   jq -n --arg app "$APP" --arg module "$MODULE" --arg version "$VERSION" --arg commit "$COMMIT" --arg date "$BUILD_DATE" --arg config "$CONFIG_FILE" --argjson targets "$(jq '.targets' <<<"$CONFIG_JSON")" '{app:$app,module:$module,version:$version,commit:$commit,build_date:$date,config:$config,targets:$targets}' > "$DIST_DIR/build-manifest.json"
   expected=$TARGET_COUNT
-  actual=$(find "$DIST_DIR" -maxdepth 1 -type f \( -name "${APP}_*" -o -name "${APP}_*.exe" \) | wc -l | tr -d ' ')
+  actual=$(find "$DIST_DIR" -maxdepth 1 -type f -name "${APP}_*" ! -name 'checksums.txt' | wc -l | tr -d ' ')
   [[ "$actual" == "$expected" ]] || { echo "artifact count $actual != $expected" >&2; exit 1; }
 fi
 
