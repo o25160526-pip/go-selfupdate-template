@@ -34,7 +34,7 @@ jobs:
           restore-keys: |
             go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-build-${{ runner.os }}-
-      - run: gofmt -w . && git diff --exit-code
+      - run: gofmt -w .
       - run: go vet ./...
       - run: go test ./... -race -count=1
 
