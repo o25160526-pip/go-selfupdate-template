@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CGO_ENABLED: "0"
+  GOTOOLCHAIN: local
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Require signing secrets
+        env:
+          PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
+          PUBLIC_KEY: ${{ secrets.UPDATE_PUBLIC_KEY }}
+        run: |
+          test -n "$PRIVATE_KEY" || { echo "Missing UPDATE_PRIVATE_KEY"; exit 1; }
+          test -n "$PUBLIC_KEY" || { echo "Missing UPDATE_PUBLIC_KEY"; exit 1; }
+
+      - name: Generate version
+        id: version
+        run: |
+          display=$(go run ./tools/genversion -check-tags=true -format=display)
+          semver=$(go run ./tools/genversion -check-tags=true -format=semver)
+          echo "display=$display" >> "$GITHUB_OUTPUT"
+          echo "tag=v$semver" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: go test ./... -race -count=1
+
+      - name: Build all platforms
+        env:
+          VERSION: ${{ steps.version.outputs.display }}
+          PUBLIC_KEY: ${{ secrets.UPDATE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS=${target%/*}; GOARCH=${target#*/}; EXT=""
+            [ "$GOOS" = windows ] && EXT=.exe
+            GOOS=$GOOS GOARCH=$GOARCH go build -trimpath \
+              -ldflags "-s -w -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Current=$VERSION' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Commit=$GITHUB_SHA' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Channel=stable' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/updater.PublicKeyPrimary=$PUBLIC_KEY'" \
+              -o "dist/app_${GOOS}_${GOARCH}${EXT}" ./cmd/app
+          done
+          cd dist && sha256sum app_* > checksums.txt
+
+      - name: Sign checksums
+        env:
+          APP_SIGNING_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
+        run: go run ./tools/sign -in dist/checksums.txt -out dist/checksums.txt.sig
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" dist/* --draft --title "${{ steps.version.outputs.display }}" --generate-notes
+
+      - name: Build previous-version probe
+        env:
+          PUBLIC_KEY: ${{ secrets.UPDATE_PUBLIC_KEY }}
+        run: |
+          go build -trimpath \
+            -ldflags "-s -w -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Current=1.00.0101.0000' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Channel=internal' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/updater.PublicKeyPrimary=$PUBLIC_KEY'" \
+            -o /tmp/app-probe ./cmd/app
+
+      - name: Prove draft can self-update
+        env:
+          APP_CHANNEL: internal
+          APP_UPDATE_TOKEN: ${{ github.token }}
+          APP_CONFIG_DIR: /tmp/app-probe-config
+          APP_CACHE_DIR: /tmp/app-probe-cache
+          APP_GITHUB_OWNER: ${{ github.repository_owner }}
+          APP_GITHUB_REPO: ${{ github.event.repository.name }}
+          VERSION: ${{ steps.version.outputs.display }}
+        run: |
+          set -euo pipefail
+          /tmp/app-probe update --silent --version "$VERSION"
+          actual=$(/tmp/app-probe version --json | jq -r .version)
+          test "$actual" = "$VERSION"
+
+      - name: Publish only after smoke update succeeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false --latest
