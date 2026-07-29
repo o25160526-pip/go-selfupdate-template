@@ -41,21 +41,11 @@ jobs:
       - name: Test
         run: go test ./... -race -count=1
 
-      - name: Build all platforms
+      - name: Build from configured targets with fallback
         env:
+          BUILD_CONFIG_FILE: ${{ vars.BUILD_CONFIG_FILE }}
           VERSION: ${{ steps.version.outputs.display }}
-          PUBLIC_KEY: ${{ secrets.UPDATE_PUBLIC_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-            GOOS=${target%/*}; GOARCH=${target#*/}; EXT=""
-            [ "$GOOS" = windows ] && EXT=.exe
-            GOOS=$GOOS GOARCH=$GOARCH go build -trimpath \
-              -ldflags "-s -w -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Current=$VERSION' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Commit=$GITHUB_SHA' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/version.Channel=stable' -X 'github.com/o25160526-pip/go-selfupdate-template/internal/updater.PublicKeyPrimary=$PUBLIC_KEY'" \
-              -o "dist/app_${GOOS}_${GOARCH}${EXT}" ./cmd/app
-          done
-          cd dist && sha256sum app_* > checksums.txt
+        run: bash scripts/ci-build.sh
 
       - name: Sign checksums
         env:
