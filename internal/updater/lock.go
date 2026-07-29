@@ -1,67 +1,46 @@
 package updater
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
-// ErrLocked means another update is already running.
-var ErrLocked = errors.New("another update is already in progress")
+// Lock is a portable create-exclusive lock. Stale locks are reclaimed.
+type Lock struct { path string }
 
-// Lock is a single-writer lock around the update process.
-//
-// Required because the tray, a scheduled auto-check and a manual `app update`
-// can all fire at once, and two processes swapping the same binary is how you
-// end up with no working binary at all.
-type Lock struct{ path string }
-
-type lockInfo struct {
-	PID       int       `json:"pid"`
-	Host      string    `json:"host"`
-	StartedAt time.Time `json:"started_at"`
-}
-
-// AcquireLock takes the lock, reclaiming it when the holder is older than
-// stale. Staleness is time based rather than PID based: liveness checks by PID
-// are unreliable on Windows and PIDs get reused.
-func AcquireLock(path string, stale time.Duration) (*Lock, error) {
-	if stale <= 0 {
-		stale = 15 * time.Minute
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
+func AcquireLock(dir string, staleAfter time.Duration) (*Lock, error) {
+	if staleAfter <= 0 { staleAfter = 30 * time.Minute }
+	if err := os.MkdirAll(dir, 0o700); err != nil { return nil, err }
+	path := filepath.Join(dir, "update.lock")
 	for attempt := 0; attempt < 2; attempt++ {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
-			host, _ := os.Hostname()
-			b, _ := json.Marshal(lockInfo{PID: os.Getpid(), Host: host, StartedAt: time.Now()})
-			f.Write(b)
-			f.Close()
+			_, _ = fmt.Fprintf(file, "%d\n%s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339))
+			_ = file.Close()
 			return &Lock{path: path}, nil
 		}
-		if !os.IsExist(err) {
-			return nil, err
+		if !os.IsExist(err) { return nil, err }
+		info, statErr := os.Stat(path)
+		if statErr == nil && time.Since(info.ModTime()) > staleAfter {
+			_ = os.Remove(path)
+			continue
 		}
-		st, serr := os.Stat(path)
-		if serr != nil {
-			continue // vanished between calls, try again
-		}
-		if time.Since(st.ModTime()) < stale {
-			return nil, fmt.Errorf("%w (held since %s)", ErrLocked, st.ModTime().Format(time.RFC3339))
-		}
-		os.Remove(path) // stale, reclaim it
+		body, _ := os.ReadFile(path)
+		return nil, fmt.Errorf("update already running (lock %s, pid %s)", path, firstLine(string(body)))
 	}
-	return nil, ErrLocked
+	return nil, fmt.Errorf("could not acquire update lock")
 }
 
 func (l *Lock) Release() error {
-	if l == nil || l.path == "" {
-		return nil
-	}
+	if l == nil || l.path == "" { return nil }
 	return os.Remove(l.path)
+}
+
+func firstLine(s string) string {
+	for i, r := range s { if r == '\n' { return s[:i] } }
+	if _, err := strconv.Atoi(s); err == nil { return s }
+	return "unknown"
 }
