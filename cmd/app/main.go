@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/o25160526-pip/go-selfupdate-template/internal/config"
@@ -26,6 +28,7 @@ func run(args []string) int {
 	switch args[0] {
 	case "version": return versionCommand(args[1:])
 	case "update": return updateCommand(args[1:])
+	case "watch": return watchCommand()
 	case "menu": return menuCommand()
 	case "help", "-h", "--help": usage(); return 0
 	default: fmt.Fprintln(os.Stderr, "unknown command:", args[0]); usage(); return exitcode.Usage
@@ -33,9 +36,10 @@ func run(args []string) int {
 }
 
 func usage() {
-	fmt.Println("Usage: app <version|update|menu>")
+	fmt.Println("Usage: app <version|update|watch|menu>")
 	fmt.Println("  app version [--json]")
 	fmt.Println("  app update [--version 1.YY.MMDD.HHmm] [--check] [--silent]")
+	fmt.Println("  app watch")
 }
 
 func versionCommand(args []string) int {
@@ -49,16 +53,23 @@ func versionCommand(args []string) int {
 	return 0
 }
 
+func runtimeEngine() (*updater.Engine, *config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil { return nil, nil, err }
+	client := &http.Client{Timeout: cfg.Timeout.Duration()}
+	sources, err := updater.NewSources(cfg, client)
+	if err != nil { return nil, nil, err }
+	engine := &updater.Engine{Config: cfg, Sources: sources, Cache: updater.Cache{Dir: config.CacheDir(), KeepBlobs: cfg.KeepBlobs}}
+	return engine, cfg, nil
+}
+
 func updateCommand(args []string) int {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	wanted := fs.String("version", "", "specific display or semver version")
 	check := fs.Bool("check", false, "check only")
 	silent := fs.Bool("silent", false, "suppress normal output")
 	if err := fs.Parse(args); err != nil { return exitcode.Usage }
-	cfg, err := config.Load()
-	if err != nil { fmt.Fprintln(os.Stderr, err); return exitcode.Usage }
-	client := &http.Client{Timeout: cfg.Timeout.Duration()}
-	sources, err := updater.NewSources(cfg, client)
+	engine, cfg, err := runtimeEngine()
 	if err != nil { fmt.Fprintln(os.Stderr, err); return exitcode.Usage }
 	request := updater.UpdateRequest{CheckOnly: *check}
 	if *wanted != "" {
@@ -68,7 +79,6 @@ func updateCommand(args []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout.Duration())
 	defer cancel()
-	engine := updater.Engine{Config: cfg, Sources: sources, Cache: updater.Cache{Dir: config.CacheDir(), KeepBlobs: cfg.KeepBlobs}}
 	result, err := engine.Update(ctx, request)
 	if err != nil {
 		code := exitcode.From(err)
@@ -81,6 +91,19 @@ func updateCommand(args []string) int {
 	return exitcode.OK
 }
 
+func watchCommand() int {
+	engine, cfg, err := runtimeEngine()
+	if err != nil { fmt.Fprintln(os.Stderr, err); return exitcode.Usage }
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	err = engine.Watch(ctx, cfg.CheckInterval.Duration(), func(result updater.UpdateResult, err error) {
+		if err == nil && result.Updated { fmt.Printf("updated to %s; restart required\n", result.Installed) }
+	})
+	if err == nil || ctx.Err() != nil { return 0 }
+	fmt.Fprintln(os.Stderr, err)
+	return exitcode.From(err)
+}
+
 func menuCommand() int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -91,17 +114,23 @@ func menuCommand() int {
 		fmt.Println("1) Show version")
 		fmt.Println("2) Check for update")
 		fmt.Println("3) Install latest")
-		base := 4
-		for i, item := range features.MenuItems() { fmt.Printf("%d) %s\n", base+i, item.Title) }
+		items := features.MenuItems()
+		for i, item := range items { fmt.Printf("%d) %s\n", 4+i, item.Title) }
 		fmt.Println("0) Exit")
 		fmt.Print("> ")
 		line, _ := reader.ReadString('\n')
-		switch strings.TrimSpace(line) {
+		choice := strings.TrimSpace(line)
+		switch choice {
 		case "0": return 0
 		case "1": versionCommand(nil)
 		case "2": updateCommand([]string{"--check"})
 		case "3": updateCommand(nil)
-		default: fmt.Println("invalid choice")
+		default:
+			handled := false
+			for i, item := range items {
+				if choice == fmt.Sprint(4+i) { handled = true; if err := item.Action(ctx); err != nil { fmt.Fprintln(os.Stderr, err) }; break }
+			}
+			if !handled { fmt.Println("invalid choice") }
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
