@@ -1,0 +1,16 @@
+# build output
+/bin/
+/dist/
+*.exe
+*.part
+*.old
+*.new
+
+# signing keys - never commit these
+*.key
+*.pem
+keys/
+
+# local state
+/.local/
+coverage.out
