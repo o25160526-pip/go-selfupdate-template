@@ -1,0 +1,43 @@
+version: 2
+
+project_name: app
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./... -count=1
+
+builds:
+  - id: app
+    main: ./cmd/app
+    binary: app
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/o25160526-pip/go-selfupdate-template/internal/version.Current={{ .Env.APP_VERSION }}
+      - -X github.com/o25160526-pip/go-selfupdate-template/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/o25160526-pip/go-selfupdate-template/internal/version.BuildDate={{ .Date }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+        goamd64: v1
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
