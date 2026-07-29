@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "issued_at": "2026-07-29T14:00:00Z",
+  "channels": {
+    "stable": {
+      "latest": "1.26.0729.2100",
+      "min_supported": "1.26.0701.0000",
+      "force_update": false,
+      "rollout_percent": 100,
+      "sources": ["github", "azure"]
+    },
+    "beta": {
+      "latest": "1.26.0729.2100",
+      "rollout_percent": 100,
+      "sources": ["github"]
+    }
+  },
+  "blocked": [],
+  "message": ""
+}
