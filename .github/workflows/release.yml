@@ -32,13 +32,11 @@ jobs:
 
       - name: Generate version
         id: version
-        run: |
-          display=$(go run ./tools/genversion -check-tags=true -format=display)
-          semver=$(go run ./tools/genversion -check-tags=true -format=semver)
-          echo "display=$display" >> "$GITHUB_OUTPUT"
-          echo "tag=v$semver" >> "$GITHUB_OUTPUT"
+        run: go run ./tools/genversion -check-tags=true -github-output "$GITHUB_OUTPUT"
 
       - name: Test
+        env:
+          CGO_ENABLED: "1"
         run: go test ./... -race -count=1
 
       - name: Build from configured targets with fallback
