@@ -38,7 +38,7 @@ jobs:
         run: jq empty .github/build-config.json
       - run: gofmt -w .
       - run: go vet ./...
-      - name: Test every package with retained diagnostics
+      - name: Test every package and publish diagnostics
         shell: bash
         run: |
           set -o pipefail
@@ -46,17 +46,11 @@ jobs:
           go test ./... -count=1 -v 2>&1 | tee ci-logs/go-test.log
           status=${PIPESTATUS[0]}
           if [[ "$status" -ne 0 ]]; then
-            {
-              echo '### go test output'
-              echo '```text'
-              cat ci-logs/go-test.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            while IFS= read -r line; do
-              safe=${line//'%'/'%25'}
-              safe=${safe//$'\n'/'%0A'}
-              echo "::error title=go test::$safe"
-            done < ci-logs/go-test.log
+            log=$(tr '\n' ' ' < ci-logs/go-test.log | cut -c1-6000)
+            log=${log//'%'/'%25'}
+            log=${log//$'\r'/'%0D'}
+            log=${log//$'\n'/'%0A'}
+            echo "::error file=ci-logs/go-test.log,line=1,title=go test failure::$log"
           fi
           exit "$status"
       - name: Upload test diagnostics
