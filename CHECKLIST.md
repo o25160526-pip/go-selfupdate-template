@@ -17,12 +17,18 @@ Last updated: 2026-07-29 UTC
 - [x] Silent update exit-code contract
 - [x] Interactive terminal menu
 - [x] Pluggable feature registry and feature scaffolder
-- [ ] Desktop system-tray frontend (headless core is complete)
-- [ ] Background periodic auto-update loop
+- [x] Desktop system-tray frontend with headless fallback
+- [x] Background periodic auto-update loop
 
 ## Build and delivery
 
 - [x] Build six OS/architecture targets
+- [x] Repository build config in `.github/build-config.json`
+- [x] Optional external build config via `BUILD_CONFIG_FILE` or `APP_BUILD_CONFIG`
+- [x] Fallback to repository config when external config is absent
+- [x] Built-in safe fallback when both configs are absent
+- [x] Config validation for target, extension and artifact count
+- [x] Build tracker manifest and checksums published as CI artifacts
 - [x] GitHub Actions module/build caches
 - [x] Azure Pipelines module/build caches
 - [x] Build and test on every push
