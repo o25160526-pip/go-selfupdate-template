@@ -41,7 +41,11 @@ steps:
   - script: jq empty .github/build-config.json
     displayName: Validate repository build configuration
 
-  - script: gofmt -w . && go vet ./... && go test ./... -race -count=1
+  - bash: |
+      set -euo pipefail
+      gofmt -w .
+      go vet ./...
+      CGO_ENABLED=1 go test ./... -race -count=1
     displayName: Test
 
   - bash: |
