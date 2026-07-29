@@ -27,7 +27,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Cache Go build output
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ hashFiles('go.mod') }}-${{ github.sha }}
